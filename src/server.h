@@ -646,13 +646,25 @@ typedef struct clientReplyBlock {
  * by integers from 0 (the default database) up to the max configured
  * database. The database number is the 'id' field in the structure. */
 typedef struct redisDb {
-    dict *dict;                 /* The keyspace for this DB */
-    dict *expires;              /* Timeout of keys with a timeout set */
+    dict *dict;                 /* 存储数据库所有键值对 The keyspace for this DB */
+    dict *expires;              /* 存储键的过期时间 Timeout of keys with a timeout set */
+    /* 使用命令BLPOP阻塞获取列表元素时，如果链表为空，会阻塞客户端，同时将此列表键记录在blocking_keys；
+     * 当使用命令PUSH向列表添加元素时，会从字典blocking_keys中查找该列表键，
+     * 如果找到说明有客户端正阻塞等待获取此列表键，于是将此列表键记录到字典ready_keys，
+     * 以便后续响应正在阻塞的客户端；第13章列表键命令将会详细介绍。 */
     dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/
     dict *ready_keys;           /* Blocked keys that received a PUSH */
+
+    /* Redis支持事务，命令multi用于开启事务，命令exec用于执行事务；
+     * 但是开启事务到执行事务期间，如何保证关心的数据不会被修改呢？
+     * Redis采用乐观锁实现。开启事务的同时可以使用watch key命令监控关心的数据键，
+     * 而watched_keys字典存储的就是被watch命令监控的所有数据键，其中key-value分别为数据键与客户端对象。
+     * 当Redis服务器接收到写命令时，会从字典watched_keys中查找该数据键，
+     * 如果找到说明有客户端正在监控此数据键，于是标记客户端对象为dirty；
+     * 待Redis服务器收到客户端exec命令时，如果客户端带有dirty标记，则会拒绝执行事务。 */
     dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
-    int id;                     /* Database ID */
-    long long avg_ttl;          /* Average TTL, just for stats */
+    int id;                     /* ·id为数据库序号，默认情况下Redis有16个数据库，id序号为0～15 Database ID */
+    long long avg_ttl;          /* 存储数据库对象的平均TTL，用于统计 Average TTL, just for stats */
     list *defrag_later;         /* List of key names to attempt to defrag one by one, gradually. */
 } redisDb;
 
@@ -722,29 +734,31 @@ typedef struct readyList {
 /* With multiplexing we need to take per-client state.
  * Clients are taken in a linked list. */
 typedef struct client {
-    uint64_t id;            /* Client incremental unique ID. */
-    int fd;                 /* Client socket. */
-    redisDb *db;            /* Pointer to currently SELECTed DB. */
-    robj *name;             /* As set by CLIENT SETNAME. */
-    sds querybuf;           /* Buffer we use to accumulate client queries. */
+    uint64_t id;            /* 客户端唯一ID，通过全局变量server.next_client_id实现  Client incremental unique ID. */
+    int fd;                 /* 客户端socket的文件描述符 Client socket. */
+    redisDb *db;            /* 客户端使用select命令选择的数据库对象 Pointer to currently SELECTed DB. */
+    robj *name;             /* 客户端名称，可以使用命令CLIENT SETNAME设置 As set by CLIENT SETNAME. */
+    sds querybuf;           /* 输入缓冲区，recv函数接收的客户端命令请求会暂时缓存在此缓冲区 Buffer we use to accumulate client queries. */
     size_t qb_pos;          /* The position we have read in querybuf. */
     sds pending_querybuf;   /* If this client is flagged as master, this buffer
                                represents the yet not applied portion of the
                                replication stream that we are receiving from
                                the master. */
     size_t querybuf_peak;   /* Recent (100ms or more) peak of querybuf size. */
-    int argc;               /* Num of arguments of current command. */
+    int argc;               /* 参数个数 Num of arguments of current command. */
     robj **argv;            /* Arguments of current command. */
+    /* 待执行的客户端命令；解析命令请求后，会根据命令名称查找该命令对应的命令对象，存储在客户端cmd字段，
+     * 可以看到其类型为struct redisCommand，我们将会在9.1.4节详细介绍命令结构体。 */
     struct redisCommand *cmd, *lastcmd;  /* Last command executed. */
     int reqtype;            /* Request protocol type: PROTO_REQ_* */
     int multibulklen;       /* Number of multi bulk arguments left to read. */
     long bulklen;           /* Length of bulk argument in multi bulk request. */
-    list *reply;            /* List of reply objects to send to the client. */
+    list *reply;            /* 输出链表，存储待返回给客户端的命令回复数据, 链表节点存储的值类型为clientReplyBlock List of reply objects to send to the client. */
     unsigned long long reply_bytes; /* Tot bytes of objects in reply list. */
     size_t sentlen;         /* Amount of bytes already sent in the current
                                buffer or object being sent. */
     time_t ctime;           /* Client creation time. */
-    time_t lastinteraction; /* Time of the last interaction, used for timeout */
+    time_t lastinteraction; /* 客户端上次与服务器交互的时间，以此实现客户端的超时处理 Time of the last interaction, used for timeout */
     time_t obuf_soft_limit_reached_time;
     int flags;              /* Client flags: CLIENT_* macros. */
     int authenticated;      /* When requirepass is non-NULL. */
