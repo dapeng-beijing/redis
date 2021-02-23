@@ -28,6 +28,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "ae.h"
+#include "zmalloc.h"
+
+#include <fcntl.h> // for open
+#include <unistd.h> // for close
 
 #include <sys/types.h>
 #include <sys/event.h>
