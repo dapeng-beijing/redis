@@ -133,6 +133,23 @@ void aeStop(aeEventLoop *eventLoop) {
     eventLoop->stop = 1;
 }
 
+/* 调用aeApiAddEvent函数添加事件之前，首先需要调用
+aeCreateFileEvent函数创建对应的文件事件，并存储在aeEventLoop结
+构体的events字段 */
+/* Redis服务器启动时需要创建socket并监听，等待客户端连接；客
+户端与服务器建立socket连接之后，服务器会等待客户端的命令请
+求；服务器处理完客户端的命令请求之后，命令回复会暂时缓存在
+client结构体的buf缓冲区，待客户端文件描述符的可写事件发生时，
+ 才会真正往客户端发送命令回复。这些都需要创建对应的文件事件:
+ aeCreateFileEvent(server.el, server.ipfd[j], AE_READABLE, acceptTcpHandler,NULL);
+aeCreateFileEvent(server.el,fd,AE_READABLE, readQueryFromClient, c);
+aeCreateFileEvent(server.el, c->fd, ae_flags, sendReplyToClient, c);
+
+ 可以发现接收客户端连接的处理函数为acceptTcpHandler，此时
+还没有创建对应的客户端对象，因此函数aeCreateFileEvent第4个参数
+为NULL；接收客户端命令请求的处理函数为readQueryFromClient；
+向客户端发送命令回复的处理函数为sendReplyToClient
+ */
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         aeFileProc *proc, void *clientData)
 {
@@ -267,6 +284,8 @@ static aeTimeEvent *aeSearchNearestTimer(aeEventLoop *eventLoop)
 }
 
 /* Process time events */
+/* 遍历时间事件链表，判断当前时间事件是否已经到期，如果到期则执
+行时间事件处理函数timeProc */
 static int processTimeEvents(aeEventLoop *eventLoop) {
     int processed = 0;
     aeTimeEvent *te;
@@ -328,8 +347,10 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
             int retval;
 
             id = te->id;
+            //处理时间事件
             retval = te->timeProc(eventLoop, id, te->clientData);
             processed++;
+            //重新设置时间事件到期时间
             if (retval != AE_NOMORE) {
                 aeAddMillisecondsToNow(retval,&te->when_sec,&te->when_ms);
             } else {
@@ -355,6 +376,14 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
  * the events that's possible to process without to wait are processed.
  *
  * The function returns the number of events processed. */
+/*
+ * 主要逻辑：
+ * ①查找最早会发生的时间事件，计算超时时间
+ * ②阻塞等待文件事件的产生；
+ * ③处理文件事件；
+ * ④处理时间事件。时间事件的执行函数为 processTimeEvents。
+ *
+ * */
 int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 {
     int processed = 0, numevents;
@@ -493,11 +522,15 @@ int aeWait(int fd, int mask, long long milliseconds) {
     }
 }
 
+// redis事件循环
 void aeMain(aeEventLoop *eventLoop) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {
         if (eventLoop->beforesleep != NULL)
             eventLoop->beforesleep(eventLoop);
+        // 第2个参数是一个标志位，AE_ALL_EVENTS表示函数需要处理文件事件与时间事件，
+        //AE_CALL_AFTER_SLEEP表示阻塞等待文件事件之后需要执行
+        //aftersleep函数
         aeProcessEvents(eventLoop, AE_ALL_EVENTS|AE_CALL_AFTER_SLEEP);
     }
 }
