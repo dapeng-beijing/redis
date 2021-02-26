@@ -93,7 +93,7 @@ int activeExpireCycleTryExpire(redisDb *db, dictEntry *de, long long now) {
  * If type is ACTIVE_EXPIRE_CYCLE_SLOW, that normal expire cycle is
  * executed, where the time limit is a percentage of the REDIS_HZ period
  * as specified by the ACTIVE_EXPIRE_CYCLE_SLOW_TIME_PERC define. */
-
+/* 过期键删除 */
 void activeExpireCycle(int type) {
     /* This function has some global state in order to continue the work
      * incrementally across calls. */
@@ -114,7 +114,9 @@ void activeExpireCycle(int type) {
         /* Don't start a fast cycle if the previous cycle did not exit
          * for time limit. Also don't repeat a fast cycle for the same period
          * as the fast cycle total duration itself. */
+        //上次activeExpireCycle函数是否已经执行完毕
         if (!timelimit_exit) return;
+        //当前时间距离上次执行快速过期键删除是否已经超过2000微秒
         if (start < last_fast_cycle + ACTIVE_EXPIRE_CYCLE_FAST_DURATION*2) return;
         last_fast_cycle = start;
     }
@@ -133,11 +135,14 @@ void activeExpireCycle(int type) {
      * per iteration. Since this function gets called with a frequency of
      * server.hz times per second, the following is the max amount of
      * microseconds we can spend in this function. */
+    // 执行时间限制，微秒为单位。默认为1000000*25/10/100 = 25000微秒 = 0.025秒
+    // 每秒执行server.hz次，默认为10次。即默认情况下每秒activeExpireCycle方法最多执行0.25秒，占总时间的1/4
     timelimit = 1000000*ACTIVE_EXPIRE_CYCLE_SLOW_TIME_PERC/server.hz/100;
     timelimit_exit = 0;
     if (timelimit <= 0) timelimit = 1;
 
     if (type == ACTIVE_EXPIRE_CYCLE_FAST)
+        //快速过期键删除时，函数执行时间不超过1000微秒(0.001秒)
         timelimit = ACTIVE_EXPIRE_CYCLE_FAST_DURATION; /* in microseconds. */
 
     /* Accumulate some global stats as we expire keys, to have some idea

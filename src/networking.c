@@ -91,8 +91,11 @@ client *createClient(int fd) {
      * in the context of a client. When commands are executed in other
      * contexts (for instance a Lua script) we need a non connected client. */
     if (fd != -1) {
+        //设置socket为非阻塞模式
         anetNonBlock(NULL,fd);
+        //设置TCP_NODELAY，如不设置，命令请求的响应时间会大大加长
         anetEnableTcpNoDelay(NULL,fd);
+        //如果服务端配置了tcpkeepalive，则设置SO_KEEPALIVE
         if (server.tcpkeepalive)
             anetKeepAlive(NULL,fd,server.tcpkeepalive);
         if (aeCreateFileEvent(server.el,fd,AE_READABLE,

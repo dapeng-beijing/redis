@@ -75,7 +75,7 @@ typedef struct aeFileEvent {
     void *clientData;   // 对应的客户端对象
 } aeFileEvent;
 
-/* Time event structure */
+/* 时间事件结构体 Time event structure */
 typedef struct aeTimeEvent {
     long long id; /* 时间事件唯一ID，通过字段eventLoop->timeEventNextId实现 time event identifier. */
     // 时间事件触发的秒数与毫秒数
@@ -107,7 +107,12 @@ typedef struct aeEventLoop {
     aeTimeEvent *timeEventHead;     //Redis有多个定时任务，因此理论上应该有多个时间事件，多个时间事件形成链表，timeEventHead即为时间事件链表头节点
     int stop;   //标识事件循环是否结束
     void *apidata; /* Redis底层可以使用4种I/O多路复用模型（kqueue、epoll等），apidata是对这4种模型的进一步封装 This is used for polling API specific data */
-    /* Redis服务器需要阻塞等待文件事件的发生，进程阻塞之前会调用beforesleep函数，进程因为某种原因被唤醒之后会调用aftersleep函数 */
+    /*
+     * Redis服务器需要阻塞等待文件事件的发生，进程阻塞之前会调用beforesleep函数
+     * 函数beforesleep会执行一些不是很费时的操作，如：
+     * 集群相关操作、过期键删除操作（这里可称为快速过期键删除）、向客户端返回命令回复等
+     * 进程因为某种原因被唤醒之后会调用aftersleep函数
+     */
     aeBeforeSleepProc *beforesleep;
     aeBeforeSleepProc *aftersleep;
 } aeEventLoop;

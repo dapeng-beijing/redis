@@ -60,6 +60,10 @@
     #endif
 #endif
 
+/*
+ * server初始化 步骤④，创建事件循环eventLoop，即分配结构体所需内存，并初始化结构体各字段；epoll就是在此时创建的
+ * 输入参数setsize理论上等于用户配置的最大客户端数目即可，但是为了确保安全，这里设置setsize等于最大客户端数目加128
+ */
 aeEventLoop *aeCreateEventLoop(int setsize) {
     aeEventLoop *eventLoop;
     int i;
@@ -76,6 +80,7 @@ aeEventLoop *aeCreateEventLoop(int setsize) {
     eventLoop->maxfd = -1;
     eventLoop->beforesleep = NULL;
     eventLoop->aftersleep = NULL;
+    // 函数aeApiCreate内部调用epoll_create创建epoll，并初始化结构体eventLoop的字段apidata
     if (aeApiCreate(eventLoop) == -1) goto err;
     /* Events with mask == AE_NONE are not set. So let's initialize the
      * vector with it. */
@@ -222,6 +227,14 @@ static void aeAddMillisecondsToNow(long long milliseconds, long *sec, long *ms) 
     *ms = when_ms;
 }
 
+/*
+ * 创建时间事件节点函数。Redis只有一个时间事件，通过此函数创建
+ * eventLoop: 事件循环结构体
+ * milliseconds: 表示此时间事件触发时间，单位毫秒，注意这是一个相对时间，即从当前时间算起，milliseconds毫秒后此时间事件会被触发；
+ * proc: 指向时间事件的处理函数
+ * clientData: 指向对应的结构体对象
+ * finalizerProc: 同样是函数指针，删除时间事件节点之前会调用此函数。
+ */
 long long aeCreateTimeEvent(aeEventLoop *eventLoop, long long milliseconds,
         aeTimeProc *proc, void *clientData,
         aeEventFinalizerProc *finalizerProc)
@@ -522,15 +535,16 @@ int aeWait(int fd, int mask, long long milliseconds) {
     }
 }
 
-// redis事件循环
+// server初始化 步骤⑦开启事件循环
 void aeMain(aeEventLoop *eventLoop) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {
         if (eventLoop->beforesleep != NULL)
+            // 函数beforesleep会执行一些不是很费时的操作，如：
+            // 集群相关操作、过期键删除操作（这里可称为快速过期键删除）、向客户端返回命令回复等
             eventLoop->beforesleep(eventLoop);
         // 第2个参数是一个标志位，AE_ALL_EVENTS表示函数需要处理文件事件与时间事件，
-        //AE_CALL_AFTER_SLEEP表示阻塞等待文件事件之后需要执行
-        //aftersleep函数
+        //AE_CALL_AFTER_SLEEP表示阻塞等待文件事件之后需要执行aftersleep函数
         aeProcessEvents(eventLoop, AE_ALL_EVENTS|AE_CALL_AFTER_SLEEP);
     }
 }
