@@ -613,12 +613,35 @@ typedef struct RedisModuleDigest {
 
 #define OBJ_SHARED_REFCOUNT INT_MAX
 typedef struct redisObject {
-    unsigned type:4;
-    unsigned encoding:4;
+    /* #define OBJ_STRING 0 字符串对象
+    #define OBJ_LIST 1  列表对象
+    #define OBJ_SET 2  集合对象
+    #define OBJ_ZSET 3  有序集合对象
+    #define OBJ_HASH 4  散列表对象
+    #define OBJ_MODULE 5 模块对象
+    #define OBJ_STREAM 6  流对象 */
+    unsigned type:4;        // 长度为4bit的Redis对象类型
+
+    /* #define OBJ_ENCODING_RAW 0  Raw representation
+    #define OBJ_ENCODING_INT 1  编码为整数
+    #define OBJ_ENCODING_HT 2  编码为散列表
+    #define OBJ_ENCODING_ZIPMAP 3  编码为zipmap
+    #define OBJ_ENCODING_LINKEDLIST 4  不再使用：旧列表编码
+    #define OBJ_ENCODING_ZIPLIST 5  编码为压缩列表
+    #define OBJ_ENCODING_INTSET 6  编码为整数集合
+    #define OBJ_ENCODING_SKIPLIST 7  编码为跳表
+    #define OBJ_ENCODING_EMBSTR 8  编码为简短字符串
+    #define OBJ_ENCODING_Quicklist 9  编码为快速链表
+    #define OBJ_ENCODING_STREAM 10  编码为listpacks的基数树 */
+    unsigned encoding:4;    // 长度为4bit的内部存储编码
+
+    /* lru占用24位，当用于LRU时表示最后一次访问时间，当
+        用于LFU时，高16位记录分钟级别的访问时间，低8位记录访问频率0
+        到255，默认配置8位可表示最大100万访问频次，详细参见object命令。 */
     unsigned lru:LRU_BITS; /* LRU time (relative to global lru_clock) or
                             * LFU data (least significant 8 bits frequency
                             * and most significant 16 bits access time). */
-    int refcount;
+    int refcount;       //引用计数。共享对象时，refcount加1；删除对象时，refcount减1，当refcount值为0时释放对象空间。
     void *ptr;
 } robj;
 
@@ -647,7 +670,8 @@ typedef struct clientReplyBlock {
  * database. The database number is the 'id' field in the structure. */
 typedef struct redisDb {
     dict *dict;                 /* 存储数据库所有键值对 The keyspace for this DB */
-    dict *expires;              /* 存储键的过期时间 Timeout of keys with a timeout set */
+    dict *expires;              /* 存储键的过期时间，dict和expires中的键都指向同一个键的sds。 Timeout of keys with a timeout set */
+
     /* 使用命令BLPOP阻塞获取列表元素时，如果链表为空，会阻塞客户端，同时将此列表键记录在blocking_keys；
      * 当使用命令PUSH向列表添加元素时，会从字典blocking_keys中查找该列表键，
      * 如果找到说明有客户端正阻塞等待获取此列表键，于是将此列表键记录到字典ready_keys，
@@ -789,11 +813,12 @@ typedef struct client {
     sds peerid;             /* Cached peer ID. */
     listNode *client_list_node; /* list node in client list */
 
-    /* Response buffer bufpos表示输出缓冲区中数据的最大字节位置，显然sentlen～bufpos
-    区间的数据都是需要返回给客户端的。可以看到reply和buf都用于缓
-    存待返回给客户端的命令回复数据，为什么同时需要reply和buf的存
-    在呢？其实二者只是用于返回不同的数据类型而已，将在9.3.3节详细
-    介绍*/
+    /*
+     * Response buffer bufpos表示输出缓冲区中数据的最大字节位置，显然sentlen～bufpos
+    区间的数据都是需要返回给客户端的。可以看到reply和buf都用于缓存待返回给客户端的命令回复数据，为什么同时需要reply和buf的存
+    在呢？其实二者只是用于返回不同的数据类型而已，将在9.3.3节详细介绍
+     通常缓存数据时都会先尝试缓存到buf输出缓冲区，如果失败会再次尝试缓存到reply输出链表
+     */
     int bufpos;
     char buf[PROTO_REPLY_CHUNK_BYTES];  //输出缓冲区，存储待返回给客户端的命令回复数据
 } client;
@@ -827,19 +852,29 @@ struct sharedObjectsStruct {
 
 /* ZSETs use a specialized version of Skiplists */
 typedef struct zskiplistNode {
-    sds ele;
-    double score;
+    sds ele;    // 用于存储字符串类型的数据
+    double score;   // 用于存储排序的分值
+    /* 后退指针，只能指向当前节点最底层的前一个节
+点，头节点和第一个节点——backward指向NULL，从后向前遍历跳跃表时使用。 */
     struct zskiplistNode *backward;
+    /* 柔性数组。每个节点的数组长度不一样，在生成跳
+跃表节点时，随机生成一个1～64的值，值越大出现的概率越低 */
     struct zskiplistLevel {
-        struct zskiplistNode *forward;
-        unsigned long span;
+        struct zskiplistNode *forward;  // 指向本层下一个节点，尾节点的forward指向NULL
+        unsigned long span;             // forward指向的节点与本节点之间的元素个数。span值越大，跳过的节点个数越多
     } level[];
 } zskiplistNode;
 
 typedef struct zskiplist {
+    /* header指向跳跃表头节点。头节点是跳跃表的一个特殊节
+点，它的level数组元素个数为64。头节点在有序集合中不存储任何
+member和score值，ele值为NULL，score值为0；也不计入跳跃表的总
+长度。头节点在初始化时，64个元素的forward都指向NULL，span值
+都为0 */
+    /* tail：指向跳跃表尾节点 */
     struct zskiplistNode *header, *tail;
-    unsigned long length;
-    int level;
+    unsigned long length;       // 跳跃表长度，表示除头节点之外的节点总数
+    int level;                  // 跳跃表的高度
 } zskiplist;
 
 typedef struct zset {

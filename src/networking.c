@@ -1420,6 +1420,9 @@ int processMultibulkBuffer(client *c) {
  * more query buffer to process, because we read more data from the socket
  * or because a client was blocked and later reactivated, so there could be
  * pending query buffer, already representing a full command, to process. */
+/*
+ * 解析命令请求
+ */
 void processInputBuffer(client *c) {
     server.current_client = c;
 
@@ -1514,6 +1517,7 @@ void processInputBufferAndReplicate(client *c) {
     }
 }
 
+// 读取socket数据存储到客户端对象的输入缓冲区，并调用函数processInputBuffer解析命令请求
 void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     client *c = (client*) privdata;
     int nread, readlen;

@@ -835,6 +835,14 @@ static unsigned long rev(unsigned long v) {
  * 3) The reverse cursor is somewhat hard to understand at first, but this
  *    comment is supposed to help.
  */
+/*
+ * *d 当前迭代的字典
+ * v 标识迭代开始的游标（即Hash表中数组索引），每次遍历后会返回新的游标值，整个遍历过程都是
+围绕这个游标值的改动进行，来保证所有的数据能被遍历到
+ * *fn 函数指针，每遍历一个节点则调用该函数处理
+ * bucketfn 整理碎片时调用
+ * *privdata 回调函数fn所需参数
+ */
 unsigned long dictScan(dict *d,
                        unsigned long v,
                        dictScanFunction *fn,

@@ -33,9 +33,11 @@
 #include <stdint.h>
 
 typedef struct intset {
+    /* 编码类型，决定每个元素占用几个字节。有如下3种类型。
+     * INTSET_ENC_INT16, INTSET_ENC_INT32, INTSET_ENC_INT64 */
     uint32_t encoding;
-    uint32_t length;
-    int8_t contents[];
+    uint32_t length;        //元素个数
+    int8_t contents[];      //柔性数组,根据encoding字段决定几个字节表示一个元素
 } intset;
 
 intset *intsetNew(void);
