@@ -1261,7 +1261,7 @@ second_replid_offset存储之前主服务器的运行ID与复制偏移量
     int repl_serve_stale_data; /* 当主从服务器断开连接时，该变量表示从服务器是否继续处理命令请求，可通过配置参数slave-serve-stale-data
                                 或者replica-serve-stale-data设置，默认为1，即可以继续处理命令请求。 Serve stale data when link is down? */
     int repl_slave_ro;          /* 从服务器是否只读（不处理写命令），可通过配置参数slave-read-only或者replica-read-only设置，默认为1，
-                                * 即从服务器不处理写命令请求，除非该命令是主服务器发送过来的 Slave is read only? */
+                                *  即从服务器不处理写命令请求，除非该命令是主服务器发送过来的 Slave is read only? */
     int repl_slave_ignore_maxmemory;    /* If true slaves do not evict. */
     time_t repl_down_since; /* Unix time at which link with master went down */
     int repl_disable_tcp_nodelay;   /* Disable TCP_NODELAY after SYNC? */
