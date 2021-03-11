@@ -192,6 +192,7 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
     serverAssert(!(listLength(slaves) != 0 && server.repl_backlog == NULL));
 
     /* Send SELECT command to every slave if needed. */
+    //如果与上次选择的数据库不相等，需要先同步select命令
     if (server.slaveseldb != dictid) {
         robj *selectcmd;
 
@@ -209,10 +210,12 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
         }
 
         /* Add the SELECT command into the backlog. */
+        //将select命令添加到复制缓冲区
         if (server.repl_backlog) feedReplicationBacklogWithObject(selectcmd);
 
         /* Send it to slaves. */
         listRewind(slaves,&li);
+        //向所有从服务器发送select命令
         while((ln = listNext(&li))) {
             client *slave = ln->value;
             if (slave->replstate == SLAVE_STATE_WAIT_BGSAVE_START) continue;
@@ -226,6 +229,7 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
 
     /* Write the command to the replication backlog if any. */
     if (server.repl_backlog) {
+        //将当前命令请求添加到复制缓冲区
         char aux[LONG_STR_SIZE+3];
 
         /* Add the multi bulk reply length. */
@@ -253,6 +257,8 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
 
     /* Write the command to every slave. */
     listRewind(slaves,&li);
+
+    //向所有从服务器同步命令请求
     while((ln = listNext(&li))) {
         client *slave = ln->value;
 

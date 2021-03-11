@@ -285,24 +285,26 @@ typedef long long ustime_t; /* microsecond time type. */
 
 /* Slave replication state. Used in server.repl_state for slaves to remember
  * what to do next. */
-#define REPL_STATE_NONE 0 /* No active replication */
-#define REPL_STATE_CONNECT 1 /* Must connect to master */
-#define REPL_STATE_CONNECTING 2 /* Connecting to master */
+#define REPL_STATE_NONE 0 /* 未开启主从复制功能，当前服务器是普通的Redis实例 No active replication */
+#define REPL_STATE_CONNECT 1 /* 待发起Socket连接主服务器 Must connect to master */
+#define REPL_STATE_CONNECTING 2 /* Socket连接成功 Connecting to master */
 /* --- Handshake states, must be ordered --- */
-#define REPL_STATE_RECEIVE_PONG 3 /* Wait for PING reply */
-#define REPL_STATE_SEND_AUTH 4 /* Send AUTH to master */
-#define REPL_STATE_RECEIVE_AUTH 5 /* Wait for AUTH reply */
-#define REPL_STATE_SEND_PORT 6 /* Send REPLCONF listening-port */
-#define REPL_STATE_RECEIVE_PORT 7 /* Wait for REPLCONF reply */
-#define REPL_STATE_SEND_IP 8 /* Send REPLCONF ip-address */
-#define REPL_STATE_RECEIVE_IP 9 /* Wait for REPLCONF reply */
-#define REPL_STATE_SEND_CAPA 10 /* Send REPLCONF capa */
-#define REPL_STATE_RECEIVE_CAPA 11 /* Wait for REPLCONF reply */
-#define REPL_STATE_SEND_PSYNC 12 /* Send PSYNC */
-#define REPL_STATE_RECEIVE_PSYNC 13 /* Wait for PSYNC reply */
+#define REPL_STATE_RECEIVE_PONG 3 /* 已经发送了PING请求包，并等待接收主服务器PONG回复； Wait for PING reply */
+#define REPL_STATE_SEND_AUTH 4 /* 待发起密码认证 Send AUTH to master */
+#define REPL_STATE_RECEIVE_AUTH 5 /* 已经发起了密码认证请求“AUTH<password>”，等待接收主服务器回复 Wait for AUTH reply */
+#define REPL_STATE_SEND_PORT 6 /* 待发送端口号 Send REPLCONF listening-port */
+#define REPL_STATE_RECEIVE_PORT 7 /* 已发送端口号“REPLCONFlistening-port<port>”，等待接收主服务器回复 Wait for REPLCONF reply */
+#define REPL_STATE_SEND_IP 8 /* 待发送IP地址 Send REPLCONF ip-address */
+#define REPL_STATE_RECEIVE_IP 9 /* 已发送IP地址“REPLCONF ipaddress<ip>”，等待接收主服务器回复；
+                        * 该IP地址与端口号用于主服务器主动建立Socket连接，并向从服务器同步数据 Wait for REPLCONF reply */
+#define REPL_STATE_SEND_CAPA 10 /* 主从复制功能进行过优化升级，不同版本Redis服务器支持的能力可能不同，
+            * 因此从服务器需要告诉主服务器自己支持的主从复制能力，通过命令“REPLCONFcapa<capability>”实现； Send REPLCONF capa */
+#define REPL_STATE_RECEIVE_CAPA 11 /* 等待接收主服务器回复 Wait for REPLCONF reply */
+#define REPL_STATE_SEND_PSYNC 12 /* 待发送PSYNC命令 Send PSYNC */
+#define REPL_STATE_RECEIVE_PSYNC 13 /* 等待接收主服务器PSYNC命令的回复结果； Wait for PSYNC reply */
 /* --- End of handshake states --- */
-#define REPL_STATE_TRANSFER 14 /* Receiving .rdb from master */
-#define REPL_STATE_CONNECTED 15 /* Connected to master */
+#define REPL_STATE_TRANSFER 14 /* 正在接收RDB文件 Receiving .rdb from master */
+#define REPL_STATE_CONNECTED 15 /* RDB文件接收并载入完毕，主从复制连接建立成功。此时从服务器只需要等待接收主服务器同步数据即可。 Connected to master */
 
 /* State of slaves from the POV of the master. Used in client->replstate.
  * In SEND_BULK and ONLINE state the slave receives new updates
@@ -992,7 +994,18 @@ struct clusterState;
 #define CHILD_INFO_TYPE_AOF 1
 
 struct redisServer {
-    /* General */
+    /*
+     * 变量主要分为：
+     * General
+     * Networking
+     * AOF persistence
+     * RDB persistence
+     * Replication (master)
+     * Replication (slave)
+     * Cluster
+     */
+
+    /* ----------------------------------------General---------------------------------------- */
     pid_t pid;                  /* Main process pid. */
     char *configfile;           /* 配置文件绝对路径 Absolute config file path, or NULL */
     char *executable;           /* Absolute executable file path. */
@@ -1018,7 +1031,8 @@ struct redisServer {
     int sentinel_mode;          /* True if this instance is a Sentinel. */
     size_t initial_memory_usage; /* Bytes used after initialization. */
     int always_show_logo;       /* Show logo even for non-stdout logging. */
-    /* Modules */
+
+    /* ----------------------------------------Modules---------------------------------------- */
     dict *moduleapi;            /* Exported core APIs dictionary for modules. */
     dict *sharedapi;            /* Like moduleapi but containing the APIs that
                                    modules share with each other. */
@@ -1026,15 +1040,14 @@ struct redisServer {
     int module_blocked_pipe[2]; /* Pipe used to awake the event loop if a
                                    client blocked on a module command needs
                                    to be processed. */
-    /* Networking */
+
+    /* ----------------------------------------Networking---------------------------------------- */
     int port;                   /* 服务器监听端口号，可通过参数port配置，默认端口号6379 TCP listening port */
     int tcp_backlog;            /* TCP listen() backlog */
 
 
-    /* 绑定的所有IP地址，可以通过参数bind配置多个，例
-    如bind 192.168.1.10010.0.0.1，bindaddr_count为用户配置的IP地址数
-    目；CONFIG_BINDADDR_MAX常量为16，即最多绑定16个IP地
-    址；Redis默认会绑定到当前机器所有可用的Ip地址 */
+    /* 绑定的所有IP地址，可以通过参数bind配置多个，例如bind 192.168.1.100 10.0.0.1，bindaddr_count为用户配置的IP地址数
+    目；CONFIG_BINDADDR_MAX常量为16，即最多绑定16个IP地址；*/
     char *bindaddr[CONFIG_BINDADDR_MAX]; /* Addresses we should bind to */
     int bindaddr_count;         /* Number of addresses in server.bindaddr[] */
     char *unixsocket;           /* UNIX socket path */
@@ -1058,6 +1071,7 @@ struct redisServer {
     dict *migrate_cached_sockets;/* MIGRATE cached sockets */
     uint64_t next_client_id;    /* Next client unique ID. Incremental. */
     int protected_mode;         /* Don't accept external connections. */
+
     /* RDB / AOF loading information */
     int loading;                /* We are loading data from disk if true */
     off_t loading_total_bytes;
@@ -1109,7 +1123,7 @@ struct redisServer {
         long long samples[STATS_METRIC_SAMPLES];
         int idx;
     } inst_metric[STATS_METRIC_COUNT];
-    /* Configuration */
+    /* ----------------------------------------Configuration---------------------------------------- */
     int verbosity;                  /* Loglevel in redis.conf */
 
 
@@ -1133,7 +1147,8 @@ struct redisServer {
     int supervised_mode;            /* See SUPERVISED_* */
     int daemonize;                  /* True if running as a daemon */
     clientBufferLimitsConfig client_obuf_limits[CLIENT_TYPE_OBUF_COUNT];
-    /* AOF persistence */
+
+    /* ----------------------------------------AOF persistence---------------------------------------- */
     int aof_state;                  /* AOF_(ON|OFF|WAIT_REWRITE) */
     int aof_fsync;                  /* Kind of fsync() policy */
     char *aof_filename;             /* Name of the AOF file */
@@ -1171,7 +1186,8 @@ struct redisServer {
     int aof_stop_sending_diff;     /* If true stop sending accumulated diffs
                                       to child process. */
     sds aof_child_diff;             /* AOF diff accumulator child side. */
-    /* RDB persistence */
+
+    /* ----------------------------------------RDB persistence---------------------------------------- */
     long long dirty;                /* Changes to DB from the last save */
     long long dirty_before_bgsave;  /* Used to restore dirty on failed BGSAVE */
     pid_t rdb_child_pid;            /* PID of RDB saving child */
@@ -1204,7 +1220,8 @@ struct redisServer {
     int syslog_enabled;             /* Is syslog enabled? */
     char *syslog_ident;             /* Syslog ident */
     int syslog_facility;            /* Syslog facility */
-    /* Replication (master) */
+
+    /* ----------------------------------------Replication (master)---------------------------------------- */
     /* 对于主服务器，replid表示的是当前服务器的运行ID；对于从服务器，replid表示其复制的主服务器的运行ID My current replication ID. */
     char replid[CONFIG_RUN_ID_SIZE+1];
 
@@ -1241,7 +1258,8 @@ second_replid_offset存储之前主服务器的运行ID与复制偏移量
     int repl_good_slaves_count;     /* 当前有效从服务器的数目 Number of slaves with lag <= max_lag. */
     int repl_diskless_sync;         /* Send RDB to slaves sockets directly. */
     int repl_diskless_sync_delay;   /* Delay to start a diskless repl BGSAVE. */
-    /* Replication (slave) */
+
+    /* ----------------------------------------Replication (slave)---------------------------------------- */
     char *masterauth;               /* 请求同步主服务器时的认证密码。 AUTH with this password with master */
     char *masterhost;               /* 主服务器IP地址 Hostname of master */
     int masterport;                 /* 主服务器端口 Port of master */
@@ -1323,7 +1341,8 @@ second_replid_offset存储之前主服务器的运行ID与复制偏移量
     list *pubsub_patterns;  /* A list of pubsub_patterns */
     int notify_keyspace_events; /* Events to propagate via Pub/Sub. This is an
                                    xor of NOTIFY_... flags. */
-    /* Cluster */
+
+    /* ----------------------------------------Cluster---------------------------------------- */
     int cluster_enabled;      /* Is cluster enabled? */
     mstime_t cluster_node_timeout; /* Cluster node timeout. */
     char *cluster_configfile; /* Cluster auto-generated config file name. */
