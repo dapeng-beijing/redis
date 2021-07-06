@@ -610,10 +610,10 @@ dictType zsetDictType = {
 
 /* Db->dict, keys are sds strings, vals are Redis objects. */
 dictType dbDictType = {
-    dictSdsHash,                /* hash function */
+    dictSdsHash,                /* 数据库字典键的散列函数 hash function */
     NULL,                       /* key dup */
     NULL,                       /* val dup */
-    dictSdsKeyCompare,          /* key compare */
+    dictSdsKeyCompare,          /* 键比较函数 key compare */
     dictSdsDestructor,          /* key destructor */
     dictObjectDestructor   /* val destructor */
 };
@@ -1103,7 +1103,10 @@ void updateCachedTime(int update_daylight_info) {
  * so in order to throttle execution of things we want to do less frequently
  * a macro is used: run_with_period(milliseconds) { .... }
  */
-
+/*
+ * 实现了Redis服务器所有定时任务的周期执行
+ * serverCron函数的执行时间不能过长，否则会导致服务器不能及时响应客户端的命令请求
+ */
 int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     int j;
     UNUSED(eventLoop);
@@ -1132,6 +1135,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
         }
     }
 
+    //100毫秒周期执行
     run_with_period(100) {
         trackInstantaneousMetric(STATS_METRIC_COMMAND,server.stat_numcommands);
         trackInstantaneousMetric(STATS_METRIC_NET_INPUT,
@@ -1195,6 +1199,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     }
 
     /* Show some info about non-empty databases */
+    //5000毫秒周期执行
     run_with_period(5000) {
         for (j = 0; j < server.dbnum; j++) {
             long long size, used, vkeys;
@@ -1221,9 +1226,11 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     }
 
     /* We need to do a few operations on clients asynchronously. */
+    //清除超时客户端连接
     clientsCron();
 
     /* Handle background operations on Redis databases. */
+    //处理数据库，清除数据库过期键等
     databasesCron();
 
     /* Start a scheduled AOF rewrite if this was requested by the user while
@@ -1366,7 +1373,12 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
             server.rdb_bgsave_scheduled = 0;
     }
 
+    // 记录serverCron函数的执行次数
     server.cronloops++;
+    // 变量server.hz表示serverCron函数的执行频率，用户可配置，最小为1最大
+    //为500，默认为10。假设server.hz取默认值10，函数返回
+    //1000/server.hz，会更新当前时间事件的触发时间为100毫秒，即
+    //serverCron的执行周期为100毫秒。
     return 1000/server.hz;
 }
 
@@ -1532,6 +1544,10 @@ void createSharedObjects(void) {
     shared.maxstring = sdsnew("maxstring");
 }
 
+/*
+ * server初始化 ①初始化配置，包括用户可配置的参数，以及命令表的初始化
+ * 具体操作就是给配置参数赋初始值
+ */
 void initServerConfig(void) {
     int j;
 
@@ -1547,10 +1563,10 @@ void initServerConfig(void) {
     server.timezone = getTimeZone(); /* Initialized by tzset(). */
     server.configfile = NULL;
     server.executable = NULL;
-    server.hz = server.config_hz = CONFIG_DEFAULT_HZ;
+    server.hz = server.config_hz = CONFIG_DEFAULT_HZ;   //serverCron函数执行频率，默认10
     server.dynamic_hz = CONFIG_DEFAULT_DYNAMIC_HZ;
     server.arch_bits = (sizeof(long) == 8) ? 64 : 32;
-    server.port = CONFIG_DEFAULT_SERVER_PORT;
+    server.port = CONFIG_DEFAULT_SERVER_PORT;           //监听端口，默认6379
     server.tcp_backlog = CONFIG_DEFAULT_TCP_BACKLOG;
     server.bindaddr_count = 0;
     server.unixsocket = NULL;
@@ -1558,9 +1574,9 @@ void initServerConfig(void) {
     server.ipfd_count = 0;
     server.sofd = -1;
     server.protected_mode = CONFIG_DEFAULT_PROTECTED_MODE;
-    server.dbnum = CONFIG_DEFAULT_DBNUM;
+    server.dbnum = CONFIG_DEFAULT_DBNUM;                //数据库数目，默认16
     server.verbosity = CONFIG_DEFAULT_VERBOSITY;
-    server.maxidletime = CONFIG_DEFAULT_CLIENT_TIMEOUT;
+    server.maxidletime = CONFIG_DEFAULT_CLIENT_TIMEOUT;     //客户端超时时间，默认0，即永不超时
     server.tcpkeepalive = CONFIG_DEFAULT_TCP_KEEPALIVE;
     server.active_expire_enabled = 1;
     server.active_defrag_enabled = CONFIG_DEFAULT_ACTIVE_DEFRAG;
@@ -1610,7 +1626,7 @@ void initServerConfig(void) {
     server.activerehashing = CONFIG_DEFAULT_ACTIVE_REHASHING;
     server.active_defrag_running = 0;
     server.notify_keyspace_events = 0;
-    server.maxclients = CONFIG_DEFAULT_MAX_CLIENTS;
+    server.maxclients = CONFIG_DEFAULT_MAX_CLIENTS;         //最大客户端数目，默认10 000
     server.blocked_clients = 0;
     memset(server.blocked_clients_by_type,0,
            sizeof(server.blocked_clients_by_type));
@@ -1928,6 +1944,9 @@ void checkTcpBacklogSettings(void) {
  * impossible to bind, or no bind addresses were specified in the server
  * configuration but the function is not able to bind * for at least
  * one of the IPv4 or IPv6 protocols. */
+/*
+ * server初始化 步骤⑤，创建socket并启动监听
+ */
 int listenToPort(int port, int *fds, int *count) {
     int j;
 
@@ -1971,6 +1990,7 @@ int listenToPort(int port, int *fds, int *count) {
                 server.tcp_backlog);
         } else {
             /* Bind IPv4 address. */
+            //创建socket并启动监听，文件描述符存储在fds数组作为返回参数
             fds[*count] = anetTcpServer(server.neterr,port,server.bindaddr[j],
                 server.tcp_backlog);
         }
@@ -1985,6 +2005,7 @@ int listenToPort(int port, int *fds, int *count) {
                     continue;
             return C_ERR;
         }
+        //设置socket非阻塞
         anetNonBlock(NULL,fds[*count]);
         (*count)++;
     }
@@ -2028,6 +2049,9 @@ void resetServerStats(void) {
     server.aof_delayed_fsync = 0;
 }
 
+/*
+ * server初始化 步骤③，初始化服务器内部变量，比如客户端链表、数据库、全局变量和共享对象等
+ */
 void initServer(void) {
     int j;
 
@@ -2094,6 +2118,7 @@ void initServer(void) {
 
     /* Create the Redis databases, and initialize other internal state. */
     for (j = 0; j < server.dbnum; j++) {
+        // dbDictType指向的是结构体dbDictType
         server.db[j].dict = dictCreate(&dbDictType,NULL);
         server.db[j].expires = dictCreate(&keyptrDictType,NULL);
         server.db[j].blocking_keys = dictCreate(&keylistDictType,NULL);
@@ -2142,6 +2167,9 @@ void initServer(void) {
     /* Create the timer callback, this is our way to process many background
      * operations incrementally, like clients timeout, eviction of unaccessed
      * expired keys and so forth. */
+    /*
+     * server初始化 步骤⑥.1，创建时间事件。
+     */
     if (aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
         serverPanic("Can't create event loop timers.");
         exit(1);
@@ -2149,6 +2177,9 @@ void initServer(void) {
 
     /* Create an event handler for accepting new connections in TCP and Unix
      * domain sockets. */
+    /*
+     * server初始化 步骤⑥.2，创建文件事件。
+     */
     for (j = 0; j < server.ipfd_count; j++) {
         if (aeCreateFileEvent(server.el, server.ipfd[j], AE_READABLE,
             acceptTcpHandler,NULL) == AE_ERR)
@@ -2210,6 +2241,14 @@ void InitServerLast() {
 
 /* Populates the Redis Command Table starting from the hard coded list
  * we have on top of redis.c file. */
+/*
+ * 当服务器接收到一条命令请求时，需要从命令表中查找命令，而
+redisCommandTable命令表是一个数组，意味着查询命令的时间复杂
+度为O(N)，效率低下。因此Redis在服务器初始化时，会将
+redisCommandTable转换为一个字典存储在redisServer对象的
+commands字段，key为命令名称，value为命令redisCommand对象
+ * populateCommandTable实现了命令表从数组到字典的转化，同时解析sflags生成flags
+ */
 void populateCommandTable(void) {
     int j;
     int numcommands = sizeof(redisCommandTable)/sizeof(struct redisCommand);
@@ -4049,6 +4088,16 @@ int redisIsSupervised(int mode) {
 }
 
 
+/*
+ * server初始化：
+ * ①初始化配置，包括用户可配置的参数，以及命令表的初始化； initServerConfig
+ * ②加载并解析配置文件；
+ * ③初始化服务端内部变量，其中就包括数据库；
+ * ④创建事件循环eventLoop；
+ * ⑤创建socket并启动监听；
+ * ⑥创建文件事件与时间事件；
+ * ⑦开启事件循环
+ */
 int main(int argc, char **argv) {
     struct timeval tv;
     int j;

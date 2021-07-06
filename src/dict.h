@@ -46,6 +46,8 @@
 
 typedef struct dictEntry {
     void *key;
+    /* v字段是个联合体，存储的是键值对中的值，在不同场景下使用不同字段。例如，用字典存储整个Redis数据库所有的键值对时，
+     * 用的是*val字段，可以指向不同类型的值；再比如，字典被用作记录键的过期时间时，用的是s64字段存储 */
     union {
         void *val;
         uint64_t u64;
@@ -74,10 +76,15 @@ typedef struct dictht {
 } dictht;
 
 typedef struct dict {
-    dictType *type;
-    void *privdata;
-    dictht ht[2];
-    long rehashidx; /* rehashing not in progress if rehashidx == -1 */
+    dictType *type;     /*该字典对应的特定操作函数*/
+    void *privdata;     /*该字典依赖的数据*/
+    dictht ht[2];       /*Hash表，键值对存储在此。一般情况下只会使用ht[0]，只有当该字典扩容、
+                            缩容需要进行rehash时，才会用到ht[1]，rehash介绍详见5.3.2节*/
+    long rehashidx; /* rehash标识。默认值为-1，代表没进行rehash操作。否则，该值用来表示Hash表ht[0]执行rehash到了
+                        哪个元素， rehashing not in progress if rehashidx == -1 */
+    /* 用来记录当前运行的安全迭代器数，当有安全迭代器绑定到该字典时，会暂停rehash操作。Redis很多场景下都会用到
+迭代器，例如：执行keys命令会创建一个安全迭代器，此时iterators会加1，命令执行完毕则减1，而执行sort命令时会创建普通迭代器，
+该字段不会改变，关于迭代器的介绍详见5.4.1节。 */
     unsigned long iterators; /* number of iterators currently running */
 } dict;
 
@@ -86,11 +93,17 @@ typedef struct dict {
  * iterating. Otherwise it is a non safe iterator, and only dictNext()
  * should be called while iterating. */
 typedef struct dictIterator {
-    dict *d;
-    long index;
-    int table, safe;
-    dictEntry *entry, *nextEntry;
+    dict *d;            // 需要迭代的字典
+    long index;         // 当前读取到Hash表中哪个索引值
+    int table, safe;    // table字段表示当前正在迭代的Hash表（即ht[0]与ht[1]中的0和1）；
+                        // safe字段表示当前创建的迭代器是否为安全模式
+    dictEntry *entry, *nextEntry;   // entry字段表示正在读取的节点数据；nextEntry字段表示entry节点中的next字段所指向的数据
     /* unsafe iterator fingerprint for misuse detection. */
+    /* fingerprint字段是一个64位的整数，表示在给定时间内字典的状
+态。在这里称其为字典的指纹，因为该字段的值为字典（dict结构
+体）中所有字段值组合在一起生成的Hash值，所以当字典中数据发
+生任何变化时，其值都会不同，生成算法不做过多解读，读者可参见
+源码dict.c文件中的dictFingerprint函数。 */
     long long fingerprint;
 } dictIterator;
 

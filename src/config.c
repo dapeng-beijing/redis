@@ -831,6 +831,12 @@ loaderr:
  * Both filename and options can be NULL, in such a case are considered
  * empty. This way loadServerConfig can be used to just load a file or
  * just load a string. */
+/*
+ * server初始化 步骤②，加载并解析配置文件
+ * filename表示配置文件全路径名称，options表示命令行输入的配置参数
+ * /home/user/redis/redis-server /home/user/redis/redis.conf -p 4000
+ * filename为 /home/user/redis/redis.conf， options为 -p 4000
+ */
 void loadServerConfig(char *filename, char *options) {
     sds config = sdsempty();
     char buf[CONFIG_MAX_LINE+1];

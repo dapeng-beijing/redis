@@ -60,6 +60,10 @@
     #endif
 #endif
 
+/*
+ * server初始化 步骤④，创建事件循环eventLoop，即分配结构体所需内存，并初始化结构体各字段；epoll就是在此时创建的
+ * 输入参数setsize理论上等于用户配置的最大客户端数目即可，但是为了确保安全，这里设置setsize等于最大客户端数目加128
+ */
 aeEventLoop *aeCreateEventLoop(int setsize) {
     aeEventLoop *eventLoop;
     int i;
@@ -76,6 +80,7 @@ aeEventLoop *aeCreateEventLoop(int setsize) {
     eventLoop->maxfd = -1;
     eventLoop->beforesleep = NULL;
     eventLoop->aftersleep = NULL;
+    // 函数aeApiCreate内部调用epoll_create创建epoll，并初始化结构体eventLoop的字段apidata
     if (aeApiCreate(eventLoop) == -1) goto err;
     /* Events with mask == AE_NONE are not set. So let's initialize the
      * vector with it. */
@@ -133,6 +138,23 @@ void aeStop(aeEventLoop *eventLoop) {
     eventLoop->stop = 1;
 }
 
+/* 调用aeApiAddEvent函数添加事件之前，首先需要调用
+aeCreateFileEvent函数创建对应的文件事件，并存储在aeEventLoop结
+构体的events字段 */
+/* Redis服务器启动时需要创建socket并监听，等待客户端连接；客
+户端与服务器建立socket连接之后，服务器会等待客户端的命令请
+求；服务器处理完客户端的命令请求之后，命令回复会暂时缓存在
+client结构体的buf缓冲区，待客户端文件描述符的可写事件发生时，
+ 才会真正往客户端发送命令回复。这些都需要创建对应的文件事件:
+ aeCreateFileEvent(server.el, server.ipfd[j], AE_READABLE, acceptTcpHandler,NULL);
+aeCreateFileEvent(server.el,fd,AE_READABLE, readQueryFromClient, c);
+aeCreateFileEvent(server.el, c->fd, ae_flags, sendReplyToClient, c);
+
+ 可以发现接收客户端连接的处理函数为acceptTcpHandler，此时
+还没有创建对应的客户端对象，因此函数aeCreateFileEvent第4个参数
+为NULL；接收客户端命令请求的处理函数为readQueryFromClient；
+向客户端发送命令回复的处理函数为sendReplyToClient
+ */
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         aeFileProc *proc, void *clientData)
 {
@@ -205,6 +227,14 @@ static void aeAddMillisecondsToNow(long long milliseconds, long *sec, long *ms) 
     *ms = when_ms;
 }
 
+/*
+ * 创建时间事件节点函数。Redis只有一个时间事件，通过此函数创建
+ * eventLoop: 事件循环结构体
+ * milliseconds: 表示此时间事件触发时间，单位毫秒，注意这是一个相对时间，即从当前时间算起，milliseconds毫秒后此时间事件会被触发；
+ * proc: 指向时间事件的处理函数
+ * clientData: 指向对应的结构体对象
+ * finalizerProc: 同样是函数指针，删除时间事件节点之前会调用此函数。
+ */
 long long aeCreateTimeEvent(aeEventLoop *eventLoop, long long milliseconds,
         aeTimeProc *proc, void *clientData,
         aeEventFinalizerProc *finalizerProc)
@@ -267,6 +297,8 @@ static aeTimeEvent *aeSearchNearestTimer(aeEventLoop *eventLoop)
 }
 
 /* Process time events */
+/* 遍历时间事件链表，判断当前时间事件是否已经到期，如果到期则执
+行时间事件处理函数timeProc */
 static int processTimeEvents(aeEventLoop *eventLoop) {
     int processed = 0;
     aeTimeEvent *te;
@@ -328,8 +360,10 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
             int retval;
 
             id = te->id;
+            //处理时间事件
             retval = te->timeProc(eventLoop, id, te->clientData);
             processed++;
+            //重新设置时间事件到期时间
             if (retval != AE_NOMORE) {
                 aeAddMillisecondsToNow(retval,&te->when_sec,&te->when_ms);
             } else {
@@ -355,6 +389,14 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
  * the events that's possible to process without to wait are processed.
  *
  * The function returns the number of events processed. */
+/*
+ * 主要逻辑：
+ * ①查找最早会发生的时间事件，计算超时时间
+ * ②阻塞等待文件事件的产生；
+ * ③处理文件事件；
+ * ④处理时间事件。时间事件的执行函数为 processTimeEvents。
+ *
+ * */
 int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 {
     int processed = 0, numevents;
@@ -493,11 +535,16 @@ int aeWait(int fd, int mask, long long milliseconds) {
     }
 }
 
+// server初始化 步骤⑦开启事件循环
 void aeMain(aeEventLoop *eventLoop) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {
         if (eventLoop->beforesleep != NULL)
+            // 函数beforesleep会执行一些不是很费时的操作，如：
+            // 集群相关操作、过期键删除操作（这里可称为快速过期键删除）、向客户端返回命令回复等
             eventLoop->beforesleep(eventLoop);
+        // 第2个参数是一个标志位，AE_ALL_EVENTS表示函数需要处理文件事件与时间事件，
+        //AE_CALL_AFTER_SLEEP表示阻塞等待文件事件之后需要执行aftersleep函数
         aeProcessEvents(eventLoop, AE_ALL_EVENTS|AE_CALL_AFTER_SLEEP);
     }
 }

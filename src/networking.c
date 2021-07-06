@@ -91,8 +91,11 @@ client *createClient(int fd) {
      * in the context of a client. When commands are executed in other
      * contexts (for instance a Lua script) we need a non connected client. */
     if (fd != -1) {
+        //设置socket为非阻塞模式
         anetNonBlock(NULL,fd);
+        //设置TCP_NODELAY，如不设置，命令请求的响应时间会大大加长
         anetEnableTcpNoDelay(NULL,fd);
+        //如果服务端配置了tcpkeepalive，则设置SO_KEEPALIVE
         if (server.tcpkeepalive)
             anetKeepAlive(NULL,fd,server.tcpkeepalive);
         if (aeCreateFileEvent(server.el,fd,AE_READABLE,
@@ -1417,6 +1420,9 @@ int processMultibulkBuffer(client *c) {
  * more query buffer to process, because we read more data from the socket
  * or because a client was blocked and later reactivated, so there could be
  * pending query buffer, already representing a full command, to process. */
+/*
+ * 解析命令请求
+ */
 void processInputBuffer(client *c) {
     server.current_client = c;
 
@@ -1511,6 +1517,7 @@ void processInputBufferAndReplicate(client *c) {
     }
 }
 
+// 读取socket数据存储到客户端对象的输入缓冲区，并调用函数processInputBuffer解析命令请求
 void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     client *c = (client*) privdata;
     int nread, readlen;

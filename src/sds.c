@@ -88,7 +88,7 @@ static inline char sdsReqType(size_t string_size) {
  * \0 characters in the middle, as the length is stored in the sds header. */
 sds sdsnewlen(const void *init, size_t initlen) {
     void *sh;
-    sds s;
+    sds s;  //s是指向buf的指针
     char type = sdsReqType(initlen);
     /* Empty strings are usually created in order to append. Use type 8
      * since type 5 is not good at this. */
@@ -97,13 +97,19 @@ sds sdsnewlen(const void *init, size_t initlen) {
     unsigned char *fp; /* flags pointer. */
 
     sh = s_malloc(hdrlen+initlen+1);
+
+
     if (init==SDS_NOINIT)
         init = NULL;
     else if (!init)
         memset(sh, 0, hdrlen+initlen+1);
     if (sh == NULL) return NULL;
+
+
     s = (char*)sh+hdrlen;
     fp = ((unsigned char*)s)-1;
+
+
     switch(type) {
         case SDS_TYPE_5: {
             *fp = type | (initlen << SDS_TYPE_BITS);
@@ -140,6 +146,8 @@ sds sdsnewlen(const void *init, size_t initlen) {
     }
     if (initlen && init)
         memcpy(s, init, initlen);
+
+
     s[initlen] = '\0';
     return s;
 }

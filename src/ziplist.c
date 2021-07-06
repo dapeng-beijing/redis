@@ -269,22 +269,24 @@
  * Note that this is not how the data is actually encoded, is just what we
  * get filled by a function in order to operate more easily. */
 typedef struct zlentry {
-    unsigned int prevrawlensize; /* Bytes used to encode the previous entry len*/
-    unsigned int prevrawlen;     /* Previous entry len. */
-    unsigned int lensize;        /* Bytes used to encode this entry type/len.
+    unsigned int prevrawlensize; /* previous_entry_length字段的长度 Bytes used to encode the previous entry len*/
+    unsigned int prevrawlen;     /* previous_entry_length字段存储的内容 Previous entry len. */
+    unsigned int lensize;        /* encoding字段的长度 Bytes used to encode this entry type/len.
                                     For example strings have a 1, 2 or 5 bytes
                                     header. Integers always use a single byte.*/
+    /* encoding字段的内容（len表示元素数据内容的长度，encoding表示数据类型） */
     unsigned int len;            /* Bytes used to represent the actual entry.
                                     For strings this is just the string length
                                     while for integers it is 1, 2, 3, 4, 8 or
                                     0 (for 4 bit immediate) depending on the
                                     number range. */
-    unsigned int headersize;     /* prevrawlensize + lensize. */
+    unsigned int headersize;     /* 当前元素的首部长度，即previous_entry_length字段长度与encoding字段长度之和
+                                    * prevrawlensize + lensize. */
     unsigned char encoding;      /* Set to ZIP_STR_* or ZIP_INT_* depending on
                                     the entry encoding. However for 4 bits
                                     immediate integers this can assume a range
                                     of values and must be range-checked. */
-    unsigned char *p;            /* Pointer to the very start of the entry, that
+    unsigned char *p;            /* 当前元素首地址 Pointer to the very start of the entry, that
                                     is, this points to prev-entry-len field. */
 } zlentry;
 
